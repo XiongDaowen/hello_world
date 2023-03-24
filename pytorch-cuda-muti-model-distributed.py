@@ -12,13 +12,15 @@ os.environ['WORLD_SIZE'] = '8'  # 设置进程数量为 8
 os.environ['MASTER_ADDR'] = '127.0.0.1'
 os.environ['MASTER_PORT'] = '49159'
 
-print("setting ready");
+print("tick 1");
 
 batch_size = 64
 learning_rate = 0.01
 num_epochs = 10
 world_size = 8
 dist_backend = "nccl" # or "gloo"
+
+print("tick 2");
 
 class Net(nn.Module):
     def __init__(self):
@@ -46,12 +48,15 @@ train_dataset = datasets.MNIST(
     download=True
 )
 
+print("initialize the process group");
+
 # initialize the process group
 dist.init_process_group(
     backend=dist_backend,
     init_method='env://',
 )
 
+print("get the rank of the current process and the total number of processes");
 # get the rank of the current process and the total number of processes
 rank = dist.get_rank()
 size = dist.get_world_size()
