@@ -6,6 +6,8 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import time
 
+# nccl gloo 更高的通信速度
+
 # 打印 GPU 数量和型号信息
 device_count = torch.cuda.device_count()
 print(f"Using {device_count} GPUs!")
