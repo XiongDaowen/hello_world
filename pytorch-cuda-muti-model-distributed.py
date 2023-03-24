@@ -41,15 +41,20 @@ train_loader = DataLoader(
     shuffle=True
 )
 
-# check whether to use GPU or CPU
-if torch.cuda.is_available():
+# check how many GPUs are available
+if torch.cuda.device_count() > 1:
     device = torch.device("cuda")
-    print("Using GPU:", torch.cuda.get_device_name())
+    print("Using", torch.cuda.device_count(), "GPUs")
 else:
-    device = torch.device("cpu")
-    print("Using CPU")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print("Using", device)
 
 model = Net().to(device)
+
+# if there are multiple GPUs, use DataParallel to distribute the model across them
+if torch.cuda.device_count() > 1:
+    model = nn.DataParallel(model)
+
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(), lr=learning_rate)
 
@@ -74,6 +79,7 @@ for epoch in range(num_epochs):
 end_time = time.time()
 elapsed_time = end_time - start_time
 
+# evaluate the model
 model.eval()
 
 with torch.no_grad():
@@ -88,4 +94,5 @@ with torch.no_grad():
         correct += (predicted == target).sum().item()
 
     print('Accuracy of the model on the {} train images: {} %'.format(len(train_dataset), 100 * correct / total))
-    print("Training completed in {:.2f} seconds".format(elapsed_time))
+# print the elapsed time
+print("Training completed in {:.2f} seconds".format(elapsed_time))
