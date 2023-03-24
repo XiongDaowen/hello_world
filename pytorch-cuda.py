@@ -1,91 +1,72 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
+import torchvision.datasets as datasets
+import torchvision.transforms as transforms
 import time
 
-batch_size = 64
-learning_rate = 0.01
-num_epochs = 10
+# 打印 GPU 数量和型号信息
+device_count = torch.cuda.device_count()
+print(f"Using {device_count} GPUs!")
+for i in range(device_count):
+    print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
 
-class Net(nn.Module):
+# 定义模型
+class Model(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
-        self.fc1 = nn.Linear(784, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.fc3 = nn.Linear(128, 10)
+        super(Model, self).__init__()
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(2)
+        self.fc1 = nn.Linear(64 * 8 * 8, 1024)
+        self.fc2 = nn.Linear(1024, 10)
 
     def forward(self, x):
-        x = torch.flatten(x, start_dim=1)
+        x = self.pool(nn.functional.relu(self.conv1(x)))
+        x = self.pool(nn.functional.relu(self.conv2(x)))
+        x = x.view(-1, 64 * 8 * 8)
         x = nn.functional.relu(self.fc1(x))
-        x = nn.functional.relu(self.fc2(x))
-        x = nn.functional.softmax(self.fc3(x), dim=1)
+        x = self.fc2(x)
         return x
 
+# 定义数据预处理
 transform = transforms.Compose([
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomCrop(32, padding=4),
     transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,))
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 ])
 
-train_dataset = datasets.MNIST(
-    root='./data',
-    train=True,
-    transform=transform,
-    download=True
-)
+# 加载 CIFAR-10 数据集
+train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=4)
 
-train_loader = DataLoader(
-    train_dataset,
-    batch_size=batch_size,
-    shuffle=True
-)
+# 创建模型实例并将其分配到单个 GPU 上
+model = Model().to('cuda:0')
 
-# check whether to use GPU or CPU
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-    print("Using GPU:", torch.cuda.get_device_name())
-else:
-    device = torch.device("cpu")
-    print("Using CPU")
-
-model = Net().to(device)
+# 定义损失函数和优化器
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
-# start the timer
 start_time = time.time()
-
-for epoch in range(num_epochs):
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-
+# 训练模型
+for epoch in range(3):
+    running_loss = 0.0
+    for i, data in enumerate(train_loader):
+        inputs, labels = data
+        inputs, labels = inputs.to('cuda:0'), labels.to('cuda:0')
         optimizer.zero_grad()
-        output = model(data)
-        loss = criterion(output, target)
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
+        running_loss += loss.item()
+        # 每迭代 100 个 batch 打印一次 loss
+        if i % 100 == 99:
+            print('[Epoch %d, Batch %5d] loss: %.3f' %
+                  (epoch + 1, i + 1, running_loss / 100))
+            running_loss = 0.0
+print('Finished Training')
 
-        if batch_idx % 100 == 0:
-            print('Epoch [{}/{}], Batch [{}/{}], Loss: {:.4f}'
-                  .format(epoch+1, num_epochs, batch_idx, len(train_loader), loss.item()))
-
-# stop the timer and calculate the elapsed time
 end_time = time.time()
-elapsed_time = end_time - start_time
-
-model.eval()
-
-with torch.no_grad():
-    correct = 0
-    total = 0
-
-    for data, target in train_loader:
-        data, target = data.to(device), target.to(device)
-        output = model(data)
-        _, predicted = torch.max(output.data, 1)
-        total += target.size(0)
-        correct += (predicted == target).sum().item()
-
-    print('Accuracy of the model on the {} train images: {} %'.format(len(train_dataset), 100 * correct / total))
-    print("Training completed in {:.2f} seconds".format(elapsed_time))
+print(f"Training time: {end_time - start_time:.2f} seconds")
