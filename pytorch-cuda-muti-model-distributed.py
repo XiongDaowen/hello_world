@@ -18,7 +18,7 @@ batch_size = 64
 learning_rate = 0.01
 num_epochs = 10
 world_size = 8
-dist_backend = "nccl" # or "gloo"
+dist_backend = "gloo" # or "gloo"
 
 print("tick 2");
 
