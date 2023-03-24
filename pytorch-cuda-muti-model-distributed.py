@@ -38,6 +38,13 @@ train_dataset = datasets.MNIST(
     download=True
 )
 
+# initialize the process group
+dist.init_process_group(backend=dist_backend)
+
+# get the rank of the current process and the total number of processes
+rank = dist.get_rank()
+size = dist.get_world_size()
+
 train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
 train_loader = DataLoader(
     train_dataset,
