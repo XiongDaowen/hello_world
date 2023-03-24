@@ -1,27 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.distributed as dist
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import time
-
-# nccl gloo 更高的通信速度
 
 # 打印 GPU 数量和型号信息
 device_count = torch.cuda.device_count()
 print(f"Using {device_count} GPUs!")
 for i in range(device_count):
     print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
- 
-
-# 初始化进程组
-dist.init_process_group(
-    backend='tcp',  # 使用tcp作为后端通信
-    init_method='tcp://localhost:23456',  # 指定服务器地址
-    rank=0,  # 当前进程的rank
-    world_size=8  # 进程组中的总进程数
-)
 
 # 定义模型
 class Model(nn.Module):
@@ -51,14 +39,11 @@ transform = transforms.Compose([
 
 # 加载 CIFAR-10 数据集
 train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=False, num_workers=4, sampler=train_sampler)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=4)
 
 # 创建模型实例并将其分配到多个 GPU 上
-print("创建模型实例并将其分配到多个 GPU 上")
-model = Model()
-model = nn.DataParallel(model)
-model.cuda()
+model = Model().to('cuda')
+model = nn.DataParallel(model, device_ids=list(range(device_count)))
 
 # 定义损失函数和优化器
 criterion = nn.CrossEntropyLoss()
@@ -68,10 +53,9 @@ start_time = time.time()
 # 训练模型
 for epoch in range(3):
     running_loss = 0.0
-    train_sampler.set_epoch(epoch)
     for i, data in enumerate(train_loader):
         inputs, labels = data
-        inputs, labels = inputs.cuda(non_blocking=True), labels.cuda(non_blocking=True)
+        inputs, labels = inputs.to('cuda'), labels.to('cuda')
         optimizer.zero_grad()
         outputs = model(inputs)
         loss = criterion(outputs, labels)
@@ -87,22 +71,3 @@ print('Finished Training')
 
 end_time = time.time()
 print(f"Training time: {end_time - start_time:.2f} seconds")
-
-# 加载 CIFAR-10 测试集
-test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=4)
-
-# 在测试集上进行验证
-model.eval()
-correct = 0
-total = 0
-with torch.no_grad():
-    for data in test_loader:
-        inputs, labels = data
-        inputs, labels = inputs.to('cuda:0'), labels.to('cuda:0')
-        outputs = model(inputs)
-        _, predicted = torch.max(outputs.data, 1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
-
-print('Accuracy on test set: %.2f %%' % (100 * correct / total))
