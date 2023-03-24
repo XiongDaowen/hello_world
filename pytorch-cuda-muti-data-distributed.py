@@ -1,103 +1,102 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
+import torchvision.datasets as datasets
+import torchvision.transforms as transforms
+import torch.utils.data.distributed
+import torch.nn.parallel.distributed as dist
+
 import time
 
-batch_size = 64
-learning_rate = 0.01
-num_epochs = 10
+# 打印 GPU 数量和型号信息
+device_count = torch.cuda.device_count()
+print(f"Using {device_count} GPUs!")
+for i in range(device_count):
+    print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
 
-class Net(nn.Module):
+# 初始化分布式训练环境
+torch.distributed.init_process_group(backend='nccl', init_method='env://')
+
+# 定义模型
+class Model(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
-        self.fc1 = nn.Linear(784, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.fc3 = nn.Linear(128, 10)
+        super(Model, self).__init__()
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(2)
+        self.fc1 = nn.Linear(64 * 8 * 8, 1024)
+        self.fc2 = nn.Linear(1024, 10)
 
     def forward(self, x):
-        x = torch.flatten(x, start_dim=1)
+        x = self.pool(nn.functional.relu(self.conv1(x)))
+        x = self.pool(nn.functional.relu(self.conv2(x)))
+        x = x.view(-1, 64 * 8 * 8)
         x = nn.functional.relu(self.fc1(x))
-        x = nn.functional.relu(self.fc2(x))
-        x = nn.functional.softmax(self.fc3(x), dim=1)
+        x = self.fc2(x)
         return x
 
+# 定义数据预处理
 transform = transforms.Compose([
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomCrop(32, padding=4),
     transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,))
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 ])
 
-train_dataset = datasets.MNIST(
-    root='./data',
-    train=True,
-    transform=transform,
-    download=True
-)
+# 加载 CIFAR-10 数据集
+train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
 
-# create multiple datasets, one for each GPU
-train_datasets = [torch.utils.data.Subset(train_dataset, indices=list(range(i, len(train_dataset), torch.cuda.device_count()))).shuffle(True) for i in range(torch.cuda.device_count())]
+# 使用 DistributedSampler 对数据集进行拆分
+train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
 
-# create multiple data loaders, one for each GPU
-train_loaders = [DataLoader(dataset=train_datasets[i], batch_size=batch_size, shuffle=True) for i in range(torch.cuda.device_count())]
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=False, num_workers=4, sampler=train_sampler)
 
-# check how many GPUs are available
-if torch.cuda.is_available():
-    device = torch.device("cuda:0")
-    print("Using", torch.cuda.device_count(), "GPUs")
-else:
-    device = torch.device("cpu")
-    print("Using CPU")
+# 创建模型实例并将其分配到多个 GPU 上
+model = Model().to('cuda')
+model = nn.parallel.DistributedDataParallel(model)
 
-model = Net().to(device)
-
-# if there are multiple GPUs, use DataParallel to distribute the data across them
-if torch.cuda.device_count() > 1:
-    model = nn.DataParallel(model)
-
+# 定义损失函数和优化器
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
-# start the timer
 start_time = time.time()
+# 训练模型
+for epoch in range(3):
+    running_loss = 0.0
+    for i, data in enumerate(train_loader):
+        inputs, labels = data
+        inputs, labels = inputs.to('cuda'), labels.to('cuda')
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item()
+        # 每迭代 100 个 batch 打印一次 loss
+        if i % 100 == 99:
+            print('[Epoch %d, Batch %5d] loss: %.3f' %
+                  (epoch + 1, i + 1, running_loss / 100))
+            running_loss = 0.0
+print('Finished Training')
 
-for epoch in range(num_epochs):
-    for loader_idx, train_loader in enumerate(train_loaders):
-        for batch_idx, (data, target) in enumerate(train_loader):
-            data, target = data.to(device), target.to(device)
-
-            optimizer.zero_grad()
-            output = model(data)
-            loss = criterion(output, target)
-            loss.backward()
-            optimizer.step()
-
-            if batch_idx % 100 == 0:
-                print('Epoch [{}/{}], Loader [{}/{}], Batch [{}/{}], Loss: {:.4f}'
-                      .format(epoch+1, num_epochs, loader_idx+1, len(train_loaders), batch_idx, len(train_loader), loss.item()))
-
-# stop the timer and calculate the elapsed time
 end_time = time.time()
-elapsed_time = end_time - start_time
+print(f"Training time: {end_time - start_time:.2f} seconds")
 
-# evaluate the model
+# 加载 CIFAR-10 测试集
+test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=4)
+
+# 在测试集上进行验证
 model.eval()
-
+correct = 0
+total = 0
 with torch.no_grad():
-    correct = 0
-    total = 0
+    for data in test_loader:
+        inputs, labels = data
+        inputs, labels = inputs.to('cuda:0'), labels.to('cuda:0')
+        outputs = model(inputs)
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
 
-    for data, target in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        output = model(data)
-        _, predicted = torch.max(output.data, 1)
-        total += target.size(0)
-        correct += (predicted == target).sum().item()
-
-    if total != 0:
-        print('Accuracy of the model on the {} train images: {} %'.format(len(train_dataset), 100 * correct / total))
-    else:
-        print('Error: total number of samples processed is zero')
-
-# print the elapsed time
-print("Training completed in {:.2f} seconds".format(elapsed_time))
+print('Accuracy on test set: %.2f %%' % (100 * correct / total))
