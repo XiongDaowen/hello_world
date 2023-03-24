@@ -5,6 +5,9 @@ import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import time
+import os
+
+os.environ['RANK'] = '0'  # 将当前进程的rank设置为0
 
 batch_size = 64
 learning_rate = 0.01
