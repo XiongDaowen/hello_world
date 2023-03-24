@@ -54,13 +54,6 @@ train_loader = DataLoader(
     sampler=train_sampler
 )
 
-# initialize the process group
-dist.init_process_group(backend=dist_backend)
-
-# get the rank of the current process and the total number of processes
-rank = dist.get_rank()
-size = dist.get_world_size()
-
 # set the device for this process
 device = torch.device("cuda:{}".format(rank))
 
