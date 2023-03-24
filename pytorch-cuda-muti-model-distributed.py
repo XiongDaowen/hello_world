@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import time
@@ -8,6 +9,8 @@ import time
 batch_size = 64
 learning_rate = 0.01
 num_epochs = 10
+world_size = 8
+dist_backend = "nccl" # or "gloo"
 
 class Net(nn.Module):
     def __init__(self):
@@ -35,33 +38,41 @@ train_dataset = datasets.MNIST(
     download=True
 )
 
+train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
 train_loader = DataLoader(
     train_dataset,
     batch_size=batch_size,
-    shuffle=True
+    shuffle=False,
+    num_workers=4,
+    sampler=train_sampler
 )
 
-# check how many GPUs are available
+# initialize the process group
+dist.init_process_group(backend=dist_backend)
+
+# get the rank of the current process and the total number of processes
+rank = dist.get_rank()
+size = dist.get_world_size()
+
+# set the device for this process
+device = torch.device("cuda:{}".format(rank))
+
+model = Net()
+
+# if there are multiple GPUs, use DistributedDataParallel to distribute the model across them
 if torch.cuda.device_count() > 1:
-    device = torch.device("cuda")
-    print("Using", torch.cuda.device_count(), "GPUs")
-else:
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print("Using", device)
+    model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
-model = Net().to(device)
+model.to(device)
 
-# if there are multiple GPUs, use DataParallel to distribute the model across them
-if torch.cuda.device_count() > 1:
-    model = nn.DataParallel(model)
-
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss().to(device)
 optimizer = optim.SGD(model.parameters(), lr=learning_rate)
 
 # start the timer
 start_time = time.time()
 
 for epoch in range(num_epochs):
+    train_sampler.set_epoch(epoch)
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
 
@@ -78,6 +89,12 @@ for epoch in range(num_epochs):
 # stop the timer and calculate the elapsed time
 end_time = time.time()
 elapsed_time = end_time - start_time
+
+# synchronize all processes and sum the elapsed time across all GPUs
+dist.barrier()
+total_time = torch.tensor([elapsed_time]).cuda()
+dist.all_reduce(total_time)
+elapsed_time = total_time.item() / world_size
 
 # evaluate the model
 model.eval()
