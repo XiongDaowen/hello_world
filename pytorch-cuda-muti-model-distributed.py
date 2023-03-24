@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed as dist
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import time
@@ -10,6 +11,15 @@ device_count = torch.cuda.device_count()
 print(f"Using {device_count} GPUs!")
 for i in range(device_count):
     print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+ 
+
+# 初始化进程组
+dist.init_process_group(
+    backend='nccl',  # 使用nccl作为后端通信
+    init_method='tcp://localhost:23456',  # 指定初始化方法
+    rank=0,  # 当前进程的rank
+    world_size=8  # 进程组中的总进程数
+)
 
 # 定义模型
 class Model(nn.Module):
