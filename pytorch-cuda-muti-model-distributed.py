@@ -8,6 +8,7 @@ import time
 import os
 
 os.environ['RANK'] = '0'  # 将当前进程的rank设置为0
+os.environ['WORLD_SIZE'] = '8'  # 设置进程数量为 8
 
 batch_size = 64
 learning_rate = 0.01
