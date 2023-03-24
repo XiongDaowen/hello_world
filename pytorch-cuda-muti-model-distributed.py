@@ -15,8 +15,8 @@ for i in range(device_count):
 
 # 初始化进程组
 dist.init_process_group(
-    backend='gloo',  # 使用gloo作为后端通信
-    init_method='tcp://localhost:23456',  # 指定初始化方法
+    backend='tcp',  # 使用tcp作为后端通信
+    init_method='tcp://localhost:23456',  # 指定服务器地址
     rank=0,  # 当前进程的rank
     world_size=8  # 进程组中的总进程数
 )
