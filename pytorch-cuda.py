@@ -70,3 +70,23 @@ print('Finished Training')
 
 end_time = time.time()
 print(f"Training time: {end_time - start_time:.2f} seconds")
+
+# 加载 CIFAR-10 测试集
+test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=4)
+
+# 在测试集上进行验证
+model.eval()
+correct = 0
+total = 0
+with torch.no_grad():
+    for data in test_loader:
+        inputs, labels = data
+        inputs, labels = inputs.to('cuda:0'), labels.to('cuda:0')
+        outputs = model(inputs)
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+print('Accuracy on test set: %.2f %%' % (100 * correct / total))
+
