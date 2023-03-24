@@ -54,4 +54,9 @@ for epoch in range(10):
         loss.backward()
         optimizer.step()
         running_loss += loss.item()
-    print('Epoch %d, loss: %.3f' % (epoch + 1, running_loss / len(train_loader)))
+        # 每迭代 100 个 batch 打印一次 loss
+        if i % 100 == 99:
+            print('[Epoch %d, Batch %5d] loss: %.3f' %
+                  (epoch + 1, i + 1, running_loss / 100))
+            running_loss = 0.0
+print('Finished Training')
