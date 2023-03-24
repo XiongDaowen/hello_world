@@ -1,133 +1,57 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.distributed as dist
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
-import time
-import os
+import torchvision.datasets as datasets
+import torchvision.transforms as transforms
 
-os.environ['RANK'] = '0'  # 将当前进程的rank设置为0
-os.environ['WORLD_SIZE'] = '8'  # 设置进程数量为 8
-os.environ['MASTER_ADDR'] = '127.0.0.1'
-os.environ['MASTER_PORT'] = '49159'
-
-print("tick 1");
-
-batch_size = 64
-learning_rate = 0.01
-num_epochs = 10
-world_size = 8
-dist_backend = "gloo" # or "gloo"
-
-print("tick 2");
-
-class Net(nn.Module):
+# 定义模型
+class Model(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
-        self.fc1 = nn.Linear(784, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.fc3 = nn.Linear(128, 10)
+        super(Model, self).__init__()
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(2)
+        self.fc1 = nn.Linear(64 * 8 * 8, 1024)
+        self.fc2 = nn.Linear(1024, 10)
 
     def forward(self, x):
-        x = torch.flatten(x, start_dim=1)
+        x = self.pool(nn.functional.relu(self.conv1(x)))
+        x = self.pool(nn.functional.relu(self.conv2(x)))
+        x = x.view(-1, 64 * 8 * 8)
         x = nn.functional.relu(self.fc1(x))
-        x = nn.functional.relu(self.fc2(x))
-        x = nn.functional.softmax(self.fc3(x), dim=1)
+        x = self.fc2(x)
         return x
 
+# 定义数据预处理
 transform = transforms.Compose([
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomCrop(32, padding=4),
     transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,))
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 ])
 
-train_dataset = datasets.MNIST(
-    root='./data',
-    train=True,
-    transform=transform,
-    download=True
-)
+# 加载 CIFAR-10 数据集
+train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=4)
 
-print("initialize the process group");
+# 定义损失函数和优化器
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
-# initialize the process group
-dist.init_process_group(
-    backend=dist_backend,
-    init_method='env://',
-)
+# 创建模型实例并将其分配到多个 GPU 上
+model = Model()
+model = nn.DataParallel(model, device_ids=[0, 1, 2, 3, 4, 5, 6, 7])
 
-print("get the rank of the current process and the total number of processes");
-# get the rank of the current process and the total number of processes
-rank = dist.get_rank()
-size = dist.get_world_size()
-
-print(f"Rank: {rank}, World Size: {size}, Master Addr: {os.environ['MASTER_ADDR']}, Master Port: {os.environ['MASTER_PORT']}")
-
-train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-train_loader = DataLoader(
-    train_dataset,
-    batch_size=batch_size,
-    shuffle=False,
-    num_workers=4,
-    sampler=train_sampler
-)
-
-# set the device for this process
-device = torch.device("cuda:{}".format(rank))
-
-model = Net()
-
-# if there are multiple GPUs, use DistributedDataParallel to distribute the model across them
-if torch.cuda.device_count() > 1:
-    model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
-
-model.to(device)
-
-criterion = nn.CrossEntropyLoss().to(device)
-optimizer = optim.SGD(model.parameters(), lr=learning_rate)
-
-# start the timer
-start_time = time.time()
-
-for epoch in range(num_epochs):
-    train_sampler.set_epoch(epoch)
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-
+# 训练模型
+for epoch in range(10):
+    running_loss = 0.0
+    for i, data in enumerate(train_loader):
+        inputs, labels = data
+        inputs, labels = inputs.to('cuda'), labels.to('cuda')
         optimizer.zero_grad()
-        output = model(data)
-        loss = criterion(output, target)
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
-
-        if batch_idx % 100 == 0:
-            print('Rank {}, Epoch [{}/{}], Batch [{}/{}], Loss: {:.4f}'
-                  .format(rank, epoch+1, num_epochs, batch_idx, len(train_loader), loss.item()))
-
-# stop the timer and calculate the elapsed time
-end_time = time.time()
-elapsed_time = end_time - start_time
-
-# synchronize all processes and sum the elapsed time across all GPUs
-dist.barrier()
-total_time = torch.tensor([elapsed_time]).cuda()
-dist.all_reduce(total_time)
-elapsed_time = total_time.item() / world_size
-
-# evaluate the model
-model.eval()
-
-with torch.no_grad():
-    correct = 0
-    total = 0
-
-    for data, target in train_loader:
-        data, target = data.to(device), target.to(device)
-        output = model(data)
-        _, predicted = torch.max(output.data, 1)
-        total += target.size(0)
-        correct += (predicted == target).sum().item()
-
-    print('Accuracy of the model on the {} train images: {} %'.format(len(train_dataset), 100 * correct / total))
-# print the elapsed time
-print("Training completed in {:.2f} seconds".format(elapsed_time))
+        running_loss += loss.item()
+    print('Epoch %d, loss: %.3f' % (epoch + 1, running_loss / len(train_loader)))
