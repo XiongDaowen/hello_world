@@ -12,6 +12,8 @@ os.environ['WORLD_SIZE'] = '8'  # 设置进程数量为 8
 os.environ['MASTER_ADDR'] = '127.0.0.1'
 os.environ['MASTER_PORT'] = '49159'
 
+print("setting ready");
+
 batch_size = 64
 learning_rate = 0.01
 num_epochs = 10
