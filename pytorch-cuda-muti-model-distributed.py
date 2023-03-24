@@ -45,11 +45,16 @@ train_dataset = datasets.MNIST(
 )
 
 # initialize the process group
-dist.init_process_group(backend=dist_backend)
+dist.init_process_group(
+    backend=dist_backend,
+    init_method='env://',
+)
 
 # get the rank of the current process and the total number of processes
 rank = dist.get_rank()
 size = dist.get_world_size()
+
+print(f"Rank: {rank}, World Size: {size}, Master Addr: {os.environ['MASTER_ADDR']}, Master Port: {os.environ['MASTER_PORT']}")
 
 train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
 train_loader = DataLoader(
@@ -89,8 +94,8 @@ for epoch in range(num_epochs):
         optimizer.step()
 
         if batch_idx % 100 == 0:
-            print('Epoch [{}/{}], Batch [{}/{}], Loss: {:.4f}'
-                  .format(epoch+1, num_epochs, batch_idx, len(train_loader), loss.item()))
+            print('Rank {}, Epoch [{}/{}], Batch [{}/{}], Loss: {:.4f}'
+                  .format(rank, epoch+1, num_epochs, batch_idx, len(train_loader), loss.item()))
 
 # stop the timer and calculate the elapsed time
 end_time = time.time()
