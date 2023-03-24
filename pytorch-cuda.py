@@ -42,6 +42,7 @@ train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, trans
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=4)
 
 # 创建模型实例并将其分配到单个 GPU 上
+print("创建模型实例并将其分配到单个 GPU 上")
 model = Model().to('cuda:0')
 
 # 定义损失函数和优化器
