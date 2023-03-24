@@ -51,7 +51,7 @@ optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
 start_time = time.time()
 # 训练模型
-for epoch in range(10):
+for epoch in range(3):
     running_loss = 0.0
     for i, data in enumerate(train_loader):
         inputs, labels = data
