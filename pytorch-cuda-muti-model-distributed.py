@@ -39,11 +39,14 @@ transform = transforms.Compose([
 
 # 加载 CIFAR-10 数据集
 train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=4)
+train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=False, num_workers=4, sampler=train_sampler)
 
 # 创建模型实例并将其分配到多个 GPU 上
-model = Model().to('cuda')
-model = nn.DataParallel(model, device_ids=list(range(device_count)))
+print("创建模型实例并将其分配到多个 GPU 上")
+model = Model()
+model = nn.DataParallel(model)
+model.cuda()
 
 # 定义损失函数和优化器
 criterion = nn.CrossEntropyLoss()
@@ -53,9 +56,10 @@ start_time = time.time()
 # 训练模型
 for epoch in range(3):
     running_loss = 0.0
+    train_sampler.set_epoch(epoch)
     for i, data in enumerate(train_loader):
         inputs, labels = data
-        inputs, labels = inputs.to('cuda'), labels.to('cuda')
+        inputs, labels = inputs.cuda(non_blocking=True), labels.cuda(non_blocking=True)
         optimizer.zero_grad()
         outputs = model(inputs)
         loss = criterion(outputs, labels)
@@ -71,3 +75,5 @@ print('Finished Training')
 
 end_time = time.time()
 print(f"Training time: {end_time - start_time:.2f} seconds")
+
+# 加载 CIFAR-10 测试集
