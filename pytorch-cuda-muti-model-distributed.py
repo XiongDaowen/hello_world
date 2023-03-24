@@ -3,6 +3,13 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+import time
+
+# 打印 GPU 数量和型号信息
+device_count = torch.cuda.device_count()
+print(f"Using {device_count} GPUs!")
+for i in range(device_count):
+    print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
 
 # 定义模型
 class Model(nn.Module):
@@ -36,12 +43,13 @@ train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffl
 
 # 创建模型实例并将其分配到多个 GPU 上
 model = Model().to('cuda')
-model = nn.DataParallel(model, device_ids=[0, 1, 2, 3, 4, 5, 6, 7])
+model = nn.DataParallel(model, device_ids=list(range(device_count)))
 
 # 定义损失函数和优化器
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
+start_time = time.time()
 # 训练模型
 for epoch in range(10):
     running_loss = 0.0
@@ -60,3 +68,6 @@ for epoch in range(10):
                   (epoch + 1, i + 1, running_loss / 100))
             running_loss = 0.0
 print('Finished Training')
+
+end_time = time.time()
+print(f"Training time: {end_time - start_time:.2f} seconds")
