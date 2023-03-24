@@ -34,13 +34,13 @@ transform = transforms.Compose([
 train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=4)
 
-# 定义损失函数和优化器
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-
 # 创建模型实例并将其分配到多个 GPU 上
 model = Model()
 model = nn.DataParallel(model, device_ids=[0, 1, 2, 3, 4, 5, 6, 7])
+
+# 定义损失函数和优化器
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
 # 训练模型
 for epoch in range(10):
