@@ -5,6 +5,10 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import time
 
+#单机多卡训练时，模型会被自动复制到多张 GPU 上，每个 GPU 计算自己的部分数据，然后将结果合并到主 GPU 上，最终更新模型参数。
+#数据也会被自动分配到多张 GPU 上，每个 GPU 计算自己的部分数据，然后将结果合并到主 GPU 上，最终计算 loss 和梯度。
+#这个过程由 nn.DataParallel 自动完成，您只需要将模型包装在 nn.DataParallel 中，并将其分配到多个 GPU 上，就可以享受单机多卡训练带来的加速效果。
+
 # 打印 GPU 数量和型号信息
 device_count = torch.cuda.device_count()
 print(f"Using {device_count} GPUs!")
